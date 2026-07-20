@@ -50,6 +50,8 @@ pub enum AppError {
     // ── Puzzle ───────────────────────────────────────────────────────────────
     /// A general puzzle-domain error.
     Puzzle(String),
+    /// A puzzle definition failed content-hash integrity verification.
+    PuzzleIntegrity(crate::puzzle::PuzzleIntegrityError),
 
     // ── Leaderboard ──────────────────────────────────────────────────────────
     /// A leaderboard-domain error.
@@ -80,6 +82,7 @@ impl fmt::Display for AppError {
                 write!(f, "item '{id}' not found in inventory")
             }
             AppError::Puzzle(msg) => write!(f, "puzzle error: {msg}"),
+            AppError::PuzzleIntegrity(e) => write!(f, "puzzle integrity error: {e}"),
             AppError::Leaderboard(msg) => write!(f, "leaderboard error: {msg}"),
         }
     }
@@ -92,6 +95,7 @@ impl std::error::Error for AppError {
         match self {
             AppError::Io(e) => Some(e),
             AppError::Serde(e) => Some(e),
+            AppError::PuzzleIntegrity(e) => Some(e),
             _ => None,
         }
     }
@@ -108,6 +112,12 @@ impl From<std::io::Error> for AppError {
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
         AppError::Serde(e)
+    }
+}
+
+impl From<crate::puzzle::PuzzleIntegrityError> for AppError {
+    fn from(e: crate::puzzle::PuzzleIntegrityError) -> Self {
+        AppError::PuzzleIntegrity(e)
     }
 }
 
@@ -191,6 +201,17 @@ mod tests {
         assert_eq!(err.to_string(), "leaderboard error: capacity reached");
     }
 
+    #[test]
+    fn display_puzzle_integrity_error() {
+        let inner = crate::puzzle::PuzzleIntegrityError::MissingHash {
+            puzzle_id: "p1".into(),
+        };
+        let err = AppError::PuzzleIntegrity(inner);
+        let msg = err.to_string();
+        assert!(msg.contains("puzzle integrity error"));
+        assert!(msg.contains("p1"));
+    }
+
     // ── Error trait tests ────────────────────────────────────────────────────
 
     #[test]
@@ -204,6 +225,15 @@ mod tests {
     fn serde_error_has_source() {
         let inner = serde_json::from_str::<()>("[").unwrap_err();
         let err = AppError::Serde(inner);
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn puzzle_integrity_error_has_source() {
+        let inner = crate::puzzle::PuzzleIntegrityError::MissingHash {
+            puzzle_id: "p1".into(),
+        };
+        let err = AppError::PuzzleIntegrity(inner);
         assert!(err.source().is_some());
     }
 
@@ -238,5 +268,14 @@ mod tests {
         let serde = serde_json::from_str::<()>("%%%").unwrap_err();
         let app: AppError = serde.into();
         assert!(matches!(app, AppError::Serde(_)));
+    }
+
+    #[test]
+    fn from_puzzle_integrity_error() {
+        let inner = crate::puzzle::PuzzleIntegrityError::MissingHash {
+            puzzle_id: "p1".into(),
+        };
+        let app: AppError = inner.into();
+        assert!(matches!(app, AppError::PuzzleIntegrity(_)));
     }
 }
