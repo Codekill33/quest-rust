@@ -1,6 +1,6 @@
 use crate::errors::AppError;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Achievement {

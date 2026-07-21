@@ -40,3 +40,11 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --check
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
+
+      - name: Build WASM
+        run: wasm-pack build --target web

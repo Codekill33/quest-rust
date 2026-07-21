@@ -1,4 +1,6 @@
-use std::{thread::sleep, time::{Duration, Instant}};
+use std::thread::sleep;
+use std::time::Duration;
+use crate::time::Instant;
 
 /// Core game engine that manages the main loop and lifecycle.
 pub struct Engine {

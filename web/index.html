@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quest Rust Web Demo</title>
+    <style>
+        body { font-family: sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto; }
+        .log { background: #eee; padding: 1rem; height: 200px; overflow-y: auto; font-family: monospace; }
+        button, input { margin: 0.5rem 0; padding: 0.5rem; }
+    </style>
+</head>
+<body>
+    <h1>Quest Rust - WASM Demo</h1>
+    <div id="controls">
+        <button id="btn-start">Start Session</button>
+        <button id="btn-hint" disabled>Reveal Hint</button>
+        <button id="btn-score">Get Score</button>
+        <button id="btn-end" disabled>End Session</button>
+        
+        <div style="margin-top: 1rem;">
+            <input type="text" id="input-answer" placeholder="Enter action..." disabled />
+            <button id="btn-submit" disabled>Submit Action</button>
+        </div>
+    </div>
+    
+    <h3>Game Log</h3>
+    <div class="log" id="log"></div>
+
+    <script type="module">
+        import init, { startSession, submitAnswer, revealHint, getScore, endSession } from '../pkg/smart_contract_game.js';
+
+        const logEl = document.getElementById('log');
+        const btnStart = document.getElementById('btn-start');
+        const btnHint = document.getElementById('btn-hint');
+        const btnScore = document.getElementById('btn-score');
+        const btnEnd = document.getElementById('btn-end');
+        const btnSubmit = document.getElementById('btn-submit');
+        const inputAnswer = document.getElementById('input-answer');
+
+        function log(msg) {
+            logEl.innerHTML += `<div>${msg}</div>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        const dummyPuzzle = {
+            id: "web-p1",
+            description: "A web puzzle! Type 'unlock' to solve.",
+            conditions: [
+                { id: "unlock", description: "Unlock the puzzle", satisfied: false }
+            ],
+            effects: [
+                { AwardScore: 100 }
+            ],
+            state: "Unsolved"
+        };
+
+        async function run() {
+            log("Initializing WASM module...");
+            await init();
+            log("WASM module loaded.");
+
+            btnStart.addEventListener('click', () => {
+                try {
+                    startSession("web-p1", JSON.stringify(dummyPuzzle));
+                    log("Session started with puzzle: web-p1");
+                    
+                    btnHint.disabled = false;
+                    btnEnd.disabled = false;
+                    btnSubmit.disabled = false;
+                    inputAnswer.disabled = false;
+                } catch (e) {
+                    log(`Error starting session: ${e}`);
+                }
+            });
+
+            btnSubmit.addEventListener('click', () => {
+                const action = inputAnswer.value.trim();
+                if (!action) return;
+                
+                try {
+                    const solved = submitAnswer(action);
+                    log(`Action '${action}' submitted.`);
+                    if (solved) {
+                        log("Puzzle solved! Score awarded.");
+                    } else {
+                        log("Puzzle not yet solved.");
+                    }
+                } catch (e) {
+                    log(`Error submitting action: ${e}`);
+                }
+                inputAnswer.value = '';
+            });
+
+            btnHint.addEventListener('click', () => {
+                try {
+                    const hint = revealHint();
+                    log(`Hint: ${hint}`);
+                } catch (e) {
+                    log(`Error revealing hint: ${e}`);
+                }
+            });
+
+            btnScore.addEventListener('click', () => {
+                try {
+                    const score = getScore();
+                    log(`Current Score: ${score}`);
+                } catch (e) {
+                    log(`Error getting score: ${e}`);
+                }
+            });
+
+            btnEnd.addEventListener('click', () => {
+                try {
+                    const finalScore = endSession();
+                    log(`Session ended. Final Score: ${finalScore}`);
+                    
+                    btnHint.disabled = true;
+                    btnEnd.disabled = true;
+                    btnSubmit.disabled = true;
+                    inputAnswer.disabled = true;
+                } catch (e) {
+                    log(`Error ending session: ${e}`);
+                }
+            });
+        }
+
+        run();
+    </script>
+</body>
+</html>

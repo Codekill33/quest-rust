@@ -1,4 +1,5 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use crate::time::Instant;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TimerState {

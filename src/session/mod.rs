@@ -4,7 +4,8 @@
 
 use crate::player::Player;
 use crate::leaderboard::{Leaderboard, Entry};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use crate::time::Instant;
 
 #[derive(Debug)]
 pub struct Session {
@@ -142,8 +143,8 @@ pub fn save_session_data(session_data: &SessionData, leaderboard: &mut Leaderboa
     let entry = Entry {
         player_id: session_data.player_id.clone(),
         score: session_data.final_score,
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        timestamp: crate::time::SystemTime::now()
+            .duration_since(crate::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
     };
