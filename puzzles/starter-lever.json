@@ -1,0 +1,18 @@
+{
+  "id": "starter-lever",
+  "description": "Pull the ancient lever to open the vault door.",
+  "conditions": [
+    {
+      "id": "pull_lever",
+      "description": "Pull the lever",
+      "satisfied": false
+    }
+  ],
+  "effects": [
+    {
+      "AwardScore": 50
+    }
+  ],
+  "state": "Unsolved",
+  "content_hash": "694180d22cfe95cf2470f11b9a8170a872110fe0b01a55bee4332e5cc107b4bc"
+}
