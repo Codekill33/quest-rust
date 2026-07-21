@@ -12,5 +12,6 @@ pub mod loader;
 pub mod player;
 pub mod puzzle;
 pub mod nft;
+pub mod plugin;
 pub mod score;
 pub mod timer;

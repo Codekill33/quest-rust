@@ -94,6 +94,12 @@ pub struct Puzzle {
     /// [`Puzzle::compute_content_hash`] and [`Puzzle::verify_content_hash`].
     #[serde(default)]
     pub content_hash: Option<String>,
+    /// Optional identifier of the plugin that should evaluate this puzzle.
+    /// When `None`, the puzzle uses the built-in evaluation path.
+    /// When `Some(id)`, the engine routes evaluation to the matching
+    /// registered plugin.
+    #[serde(default)]
+    pub plugin_id: Option<String>,
 }
 
 impl Puzzle {
@@ -118,6 +124,7 @@ impl Puzzle {
             effects,
             state: PuzzleState::Unsolved,
             content_hash: None,
+            plugin_id: None,
         }
     }
 
@@ -561,6 +568,44 @@ mod tests {
         let a = single_condition_puzzle();
         let b = multi_condition_puzzle();
         assert_ne!(a.compute_content_hash(), b.compute_content_hash());
+    }
+
+    #[test]
+    fn plugin_id_does_not_affect_content_hash() {
+        let mut a = single_condition_puzzle();
+        let hash_without = a.compute_content_hash();
+
+        a.plugin_id = Some("some_plugin".to_string());
+        let hash_with = a.compute_content_hash();
+
+        assert_eq!(hash_without, hash_with);
+    }
+
+    #[test]
+    fn plugin_id_serialization_round_trip() {
+        let mut puzzle = single_condition_puzzle();
+        puzzle.plugin_id = Some("crypto_plugin".to_string());
+
+        let json = puzzle.to_json().expect("serialize");
+        let restored = Puzzle::from_json(&json).expect("deserialize");
+        assert_eq!(restored.plugin_id, Some("crypto_plugin".to_string()));
+    }
+
+    #[test]
+    fn plugin_id_defaults_to_none_when_absent() {
+        let puzzle = single_condition_puzzle();
+        assert!(puzzle.plugin_id.is_none());
+
+        // Also verify deserialization of JSON without the field
+        let json = r#"{
+            "id": "p-legacy",
+            "description": "A legacy puzzle",
+            "conditions": [],
+            "effects": [],
+            "state": "Unsolved"
+        }"#;
+        let restored = Puzzle::from_json(json).expect("deserialize");
+        assert!(restored.plugin_id.is_none());
     }
 
     #[test]

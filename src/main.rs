@@ -24,8 +24,20 @@ fn main() {
         ));
     }
 
+    let mut engine = engine::Engine::new(Duration::from_millis(16));
+    
+    // Register the built-in core logic plugin with the engine
+    use smart_contract_game::plugin::core_logic_plugin::CoreLogicPlugin;
+    if let Err(e) = engine.register_plugin(Box::new(CoreLogicPlugin)) {
+        eprintln!("Failed to register built-in plugins: {e}");
+        std::process::exit(1);
+    }
+
+    if args.iter().any(|a| a == "--list-plugins") {
+        std::process::exit(run_list_plugins(&engine));
+    }
+
     // Initialize and run the core engine for a short duration to ensure clean startup/shutdown.
-    let engine = engine::Engine::new(Duration::from_millis(16));
     engine.init();
     engine.run_for(Duration::from_millis(100));
     engine.shutdown();
@@ -111,4 +123,17 @@ fn run_generate_hashes(dir: &str, admin_confirmed: bool) -> i32 {
             1
         }
     }
+}
+
+/// Runs the `--list-plugins` command: enumerates all registered plugins
+/// and prints their metadata. Returns the process exit code.
+fn run_list_plugins(engine: &smart_contract_game::engine::Engine) -> i32 {
+    let plugins = engine.list_plugins();
+    println!("Registered Plugins ({} total):", plugins.len());
+    for (id, meta) in plugins {
+        println!("\n• ID:      {id}");
+        println!("  Name:    {} (v{})", meta.name, meta.version);
+        println!("  Summary: {}", meta.description);
+    }
+    0
 }
