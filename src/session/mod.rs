@@ -12,6 +12,10 @@ pub struct Session {
     active_puzzle: Option<usize>,
     timer: Timer,
     current_score: u64,
+    /// Content hashes of puzzles completed so far this session, carried
+    /// through to [`SessionData`] so they can be submitted to `logiquest_api`
+    /// alongside the score for server-side authenticity verification.
+    completed_puzzle_hashes: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -61,6 +65,11 @@ pub struct SessionData {
     pub final_score: u64,
     pub total_time: Duration,
     pub puzzles_completed: usize,
+    /// Content hashes of every puzzle completed during the session, in
+    /// completion order. Submitted to `logiquest_api` so the server can
+    /// verify the score was derived from authentic, untampered puzzle
+    /// content rather than a modified local puzzle file.
+    pub puzzle_content_hashes: Vec<String>,
 }
 
 impl Session {
@@ -70,6 +79,7 @@ impl Session {
             player,
             timer: Timer::new(),
             current_score: 0,
+            completed_puzzle_hashes: Vec::new(),
         }
     }
 
@@ -90,6 +100,7 @@ impl Session {
             final_score,
             total_time,
             puzzles_completed: self.player.current_puzzle_index,
+            puzzle_content_hashes: self.completed_puzzle_hashes,
         }
     }
 
@@ -102,6 +113,16 @@ impl Session {
         self.player.advance_puzzle();
         self.active_puzzle = Some(self.player.current_puzzle_index);
         self.current_score = 0;
+    }
+
+    /// Like [`Session::complete_puzzle`], but also records the completed
+    /// puzzle's content hash so it can be submitted to `logiquest_api` for
+    /// server-side integrity verification. Call this instead of
+    /// `complete_puzzle` when the puzzle was loaded (and hash-verified) via
+    /// the [`crate::loader`] module.
+    pub fn complete_puzzle_with_hash(&mut self, content_hash: impl Into<String>) {
+        self.completed_puzzle_hashes.push(content_hash.into());
+        self.complete_puzzle();
     }
 
     pub fn player(&self) -> &Player {
@@ -190,5 +211,31 @@ mod tests {
         assert_eq!(leaderboard.top().len(), 1);
         assert_eq!(leaderboard.top()[0].score, 200);
         assert_eq!(leaderboard.top()[0].player_id, "test");
+    }
+
+    #[test]
+    fn session_data_carries_no_hashes_when_none_completed() {
+        let player = Player::new("test");
+        let session = Session::new(player);
+        let data = session.end();
+        assert!(data.puzzle_content_hashes.is_empty());
+    }
+
+    #[test]
+    fn complete_puzzle_with_hash_records_hash_for_submission() {
+        let player = Player::new("test");
+        let mut session = Session::new(player);
+
+        session.add_score(50);
+        session.complete_puzzle_with_hash("hash-of-puzzle-1");
+        session.add_score(30);
+        session.complete_puzzle_with_hash("hash-of-puzzle-2");
+
+        let data = session.end();
+        assert_eq!(
+            data.puzzle_content_hashes,
+            vec!["hash-of-puzzle-1".to_string(), "hash-of-puzzle-2".to_string()]
+        );
+        assert_eq!(data.final_score, 80);
     }
 }

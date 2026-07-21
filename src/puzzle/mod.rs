@@ -14,6 +14,8 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::fmt;
 
 // ── Condition ────────────────────────────────────────────────────────────────
 
@@ -86,6 +88,12 @@ pub struct Puzzle {
     pub effects: Vec<Effect>,
     /// Current lifecycle state of the puzzle.
     pub state: PuzzleState,
+    /// SHA-256 hex digest of the puzzle's canonical content, used to detect
+    /// tampering with puzzle definition files. Absent for puzzles that were
+    /// constructed in-memory rather than loaded from a hashed file — see
+    /// [`Puzzle::compute_content_hash`] and [`Puzzle::verify_content_hash`].
+    #[serde(default)]
+    pub content_hash: Option<String>,
 }
 
 impl Puzzle {
@@ -109,6 +117,7 @@ impl Puzzle {
             conditions,
             effects,
             state: PuzzleState::Unsolved,
+            content_hash: None,
         }
     }
 
@@ -179,7 +188,145 @@ impl Puzzle {
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
+
+    /// Computes the SHA-256 hex digest of this puzzle's canonical content.
+    ///
+    /// The canonical representation covers everything that defines the
+    /// puzzle — id, description, condition ids/descriptions, and effects —
+    /// but deliberately excludes fields that change during play
+    /// ([`Puzzle::state`], each [`Condition::satisfied`] flag) and the
+    /// [`Puzzle::content_hash`] field itself, since those are not part of
+    /// the puzzle's authored content.
+    pub fn compute_content_hash(&self) -> String {
+        let canonical = CanonicalPuzzle {
+            id: &self.id,
+            description: &self.description,
+            conditions: self
+                .conditions
+                .iter()
+                .map(|c| CanonicalCondition {
+                    id: &c.id,
+                    description: &c.description,
+                })
+                .collect(),
+            effects: &self.effects,
+        };
+        // `serde_json::to_string` serializes struct fields in declaration
+        // order, so this is deterministic across runs and machines.
+        let canonical_json = serde_json::to_string(&canonical)
+            .expect("canonical puzzle content is always valid JSON");
+
+        let mut hasher = Sha256::new();
+        hasher.update(canonical_json.as_bytes());
+        let digest = hasher.finalize();
+        hex_encode(&digest)
+    }
+
+    /// Sets [`Puzzle::content_hash`] to the freshly computed content hash.
+    ///
+    /// Used by the `--generate-hashes` admin CLI command to (re)stamp puzzle
+    /// definition files after legitimate content changes.
+    pub fn generate_content_hash(&mut self) -> &str {
+        self.content_hash = Some(self.compute_content_hash());
+        self.content_hash.as_deref().unwrap()
+    }
+
+    /// Verifies that [`Puzzle::content_hash`] matches the puzzle's actual
+    /// content, returning a [`PuzzleIntegrityError`] if the hash is missing
+    /// or does not match.
+    pub fn verify_content_hash(&self) -> Result<(), PuzzleIntegrityError> {
+        match &self.content_hash {
+            None => Err(PuzzleIntegrityError::MissingHash {
+                puzzle_id: self.id.clone(),
+            }),
+            Some(expected) => {
+                let actual = self.compute_content_hash();
+                if *expected == actual {
+                    Ok(())
+                } else {
+                    Err(PuzzleIntegrityError::Mismatch {
+                        puzzle_id: self.id.clone(),
+                        expected: expected.clone(),
+                        actual,
+                    })
+                }
+            }
+        }
+    }
 }
+
+// ── Canonical hashing ────────────────────────────────────────────────────────
+
+/// Canonical, hash-stable view of a puzzle's authored content.
+///
+/// Field order here is significant: it defines the byte layout that gets
+/// hashed, so it must never be reordered without treating that as a breaking
+/// change to every previously generated `content_hash`.
+#[derive(Serialize)]
+struct CanonicalPuzzle<'a> {
+    id: &'a str,
+    description: &'a str,
+    conditions: Vec<CanonicalCondition<'a>>,
+    effects: &'a [Effect],
+}
+
+#[derive(Serialize)]
+struct CanonicalCondition<'a> {
+    id: &'a str,
+    description: &'a str,
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        write!(s, "{b:02x}").expect("writing to a String cannot fail");
+    }
+    s
+}
+
+// ── PuzzleIntegrityError ─────────────────────────────────────────────────────
+
+/// Error returned when a puzzle's content hash cannot be verified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PuzzleIntegrityError {
+    /// The puzzle definition has no `content_hash` set at all.
+    MissingHash {
+        /// The id of the puzzle missing a hash.
+        puzzle_id: String,
+    },
+    /// The stored `content_hash` does not match the recomputed hash,
+    /// indicating the puzzle content was modified after the hash was
+    /// generated (i.e. tampering).
+    Mismatch {
+        /// The id of the puzzle whose hash did not match.
+        puzzle_id: String,
+        /// The hash stored in the puzzle definition.
+        expected: String,
+        /// The hash recomputed from the puzzle's current content.
+        actual: String,
+    },
+}
+
+impl fmt::Display for PuzzleIntegrityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PuzzleIntegrityError::MissingHash { puzzle_id } => {
+                write!(f, "puzzle '{puzzle_id}' has no content_hash to verify")
+            }
+            PuzzleIntegrityError::Mismatch {
+                puzzle_id,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "puzzle '{puzzle_id}' failed integrity verification: expected hash {expected}, computed {actual}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PuzzleIntegrityError {}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -343,5 +490,94 @@ mod tests {
         let json = puzzle.to_json().expect("serialize");
         let restored = Puzzle::from_json(&json).expect("deserialize");
         assert_eq!(puzzle, restored);
+    }
+
+    // ── Content integrity ───────────────────────────────────────────────────
+
+    #[test]
+    fn generate_content_hash_then_verify_succeeds() {
+        let mut puzzle = single_condition_puzzle();
+        puzzle.generate_content_hash();
+        assert!(puzzle.content_hash.is_some());
+        assert!(puzzle.verify_content_hash().is_ok());
+    }
+
+    #[test]
+    fn verify_fails_when_hash_missing() {
+        let puzzle = single_condition_puzzle();
+        let err = puzzle.verify_content_hash().unwrap_err();
+        assert_eq!(
+            err,
+            PuzzleIntegrityError::MissingHash {
+                puzzle_id: "p1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn verify_fails_when_content_tampered_after_hashing() {
+        let mut puzzle = single_condition_puzzle();
+        puzzle.generate_content_hash();
+
+        // Tamper with the description after the hash was generated.
+        puzzle.description = "A completely different puzzle".to_string();
+
+        let err = puzzle.verify_content_hash().unwrap_err();
+        assert!(matches!(err, PuzzleIntegrityError::Mismatch { .. }));
+    }
+
+    #[test]
+    fn verify_fails_when_effects_tampered_after_hashing() {
+        let mut puzzle = single_condition_puzzle();
+        puzzle.generate_content_hash();
+
+        // Tamper with the score reward without touching the stored hash.
+        puzzle.effects = vec![Effect::AwardScore(999_999)];
+
+        assert!(puzzle.verify_content_hash().is_err());
+    }
+
+    #[test]
+    fn hash_is_stable_across_runs_for_same_content() {
+        let a = single_condition_puzzle();
+        let b = single_condition_puzzle();
+        assert_eq!(a.compute_content_hash(), b.compute_content_hash());
+    }
+
+    #[test]
+    fn hash_does_not_change_when_gameplay_state_mutates() {
+        let mut puzzle = single_condition_puzzle();
+        let hash_before = puzzle.compute_content_hash();
+
+        // Solving the puzzle mutates `state` and `conditions[].satisfied`,
+        // neither of which is part of the puzzle's authored content.
+        puzzle.evaluate("pull_lever");
+
+        assert_eq!(puzzle.compute_content_hash(), hash_before);
+    }
+
+    #[test]
+    fn different_content_produces_different_hash() {
+        let a = single_condition_puzzle();
+        let b = multi_condition_puzzle();
+        assert_ne!(a.compute_content_hash(), b.compute_content_hash());
+    }
+
+    #[test]
+    fn integrity_error_messages_are_descriptive() {
+        let missing = PuzzleIntegrityError::MissingHash {
+            puzzle_id: "p1".to_string(),
+        };
+        assert!(missing.to_string().contains("p1"));
+
+        let mismatch = PuzzleIntegrityError::Mismatch {
+            puzzle_id: "p2".to_string(),
+            expected: "aaa".to_string(),
+            actual: "bbb".to_string(),
+        };
+        let msg = mismatch.to_string();
+        assert!(msg.contains("p2"));
+        assert!(msg.contains("aaa"));
+        assert!(msg.contains("bbb"));
     }
 }
