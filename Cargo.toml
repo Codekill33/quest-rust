@@ -23,6 +23,9 @@ wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", features = ["Storage", "Window", "Performance"], optional = true }
 js-sys = { version = "0.3", optional = true }
 once_cell = { version = "1.19", optional = true }
+fluent = "0.16"
+fluent-bundle = "0.15"
+unic-langid = { version = "0.9", features = ["macros"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["full"] }
