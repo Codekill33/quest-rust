@@ -1,4 +1,4 @@
-pub mod engine;
+use smart_contract_game::{engine, l10n::L10n};
 
 use std::time::Duration;
 
@@ -10,10 +10,18 @@ fn main() {
     use smart_contract_game::player::Player;
 
     let args: Vec<String> = std::env::args().collect();
+    
+    let lang = args.iter()
+        .position(|a| a == "--lang")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "en".to_string());
+        
+    let l10n = L10n::new(&lang);
 
     if args.iter().any(|a| a == "--verify-puzzles") {
         let dir = puzzles_dir_arg(&args);
-        std::process::exit(run_verify_puzzles(&dir));
+        std::process::exit(run_verify_puzzles(&dir, &l10n));
     }
 
     if args.iter().any(|a| a == "--generate-hashes") {
@@ -21,6 +29,7 @@ fn main() {
         std::process::exit(run_generate_hashes(
             &dir,
             args.iter().any(|a| a == "--admin"),
+            &l10n,
         ));
     }
 
@@ -49,7 +58,11 @@ fn main() {
 
     match player.to_json() {
         Ok(json) => println!("Player state: {json}"),
-        Err(e) => eprintln!("Failed to serialize player: {e}"),
+        Err(e) => eprintln!("{}", l10n.get("error-serialize-player", Some(&{
+            let mut args = fluent::FluentArgs::new();
+            args.set("error", e.to_string());
+            args
+        }))),
     }
 }
 
@@ -66,7 +79,7 @@ fn puzzles_dir_arg(args: &[String]) -> String {
 
 /// Runs the `--verify-puzzles` command: checks every puzzle file in `dir`
 /// and reports integrity failures. Returns the process exit code.
-fn run_verify_puzzles(dir: &str) -> i32 {
+fn run_verify_puzzles(dir: &str, l10n: &L10n) -> i32 {
     use smart_contract_game::loader::verify_puzzles_in_dir;
 
     let reports = match verify_puzzles_in_dir(dir) {
@@ -80,20 +93,20 @@ fn run_verify_puzzles(dir: &str) -> i32 {
     let mut failures = 0;
     for report in &reports {
         match &report.result {
-            Ok(()) => println!("OK   {}", report.path.display()),
+            Ok(()) => println!("{}   {}", l10n.get("ok-status", None), report.path.display()),
             Err(e) => {
                 failures += 1;
-                println!("FAIL {}: {e}", report.path.display());
+                println!("{} {}: {e}", l10n.get("fail-status", None), report.path.display());
             }
         }
     }
 
-    println!(
-        "\nVerified {} puzzle file(s): {} ok, {} failed.",
-        reports.len(),
-        reports.len() - failures,
-        failures
-    );
+    let mut args = fluent::FluentArgs::new();
+    args.set("count", reports.len());
+    args.set("ok", reports.len() - failures);
+    args.set("fail", failures);
+
+    println!("\n{}", l10n.get("verified-puzzle-count", Some(&args)));
 
     if failures > 0 { 1 } else { 0 }
 }
@@ -102,24 +115,29 @@ fn run_verify_puzzles(dir: &str) -> i32 {
 /// `content_hash` for every puzzle file in `dir`. Admin-only — requires
 /// `--admin` to also be passed, since this rewrites puzzle files in place.
 /// Returns the process exit code.
-fn run_generate_hashes(dir: &str, admin_confirmed: bool) -> i32 {
+fn run_generate_hashes(dir: &str, admin_confirmed: bool, l10n: &L10n) -> i32 {
     use smart_contract_game::loader::generate_hashes_in_dir;
 
     if !admin_confirmed {
-        eprintln!(
-            "--generate-hashes rewrites puzzle files in place and is admin-only. \
-             Re-run with --admin to confirm: --generate-hashes {dir} --admin"
-        );
+        let mut args = fluent::FluentArgs::new();
+        args.set("dir", dir);
+        eprintln!("{}", l10n.get("error-generate-hashes-admin", Some(&args)));
         return 1;
     }
 
     match generate_hashes_in_dir(dir) {
         Ok(count) => {
-            println!("Regenerated content_hash for {count} puzzle file(s) in '{dir}'.");
+            let mut args = fluent::FluentArgs::new();
+            args.set("count", count);
+            args.set("dir", dir);
+            println!("{}", l10n.get("success-generate-hashes", Some(&args)));
             0
         }
         Err(e) => {
-            eprintln!("Failed to generate hashes in '{dir}': {e}");
+            let mut args = fluent::FluentArgs::new();
+            args.set("dir", dir);
+            args.set("error", e.to_string());
+            eprintln!("{}", l10n.get("error-generate-hashes", Some(&args)));
             1
         }
     }

@@ -1,5 +1,7 @@
 pub mod cli;
+pub mod engine;
 pub mod logic;
+pub mod l10n;
 pub mod config;
 pub mod difficulty;
 pub mod errors;
