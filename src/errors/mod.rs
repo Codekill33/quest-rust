@@ -56,6 +56,12 @@ pub enum AppError {
     // ── Leaderboard ──────────────────────────────────────────────────────────
     /// A leaderboard-domain error.
     Leaderboard(String),
+
+    // ── Plugin ───────────────────────────────────────────────────────────────
+    /// A puzzle references a plugin id that is not registered.
+    PluginNotFound(String),
+    /// A plugin with the given id has already been registered.
+    PluginAlreadyRegistered(String),
 }
 
 // ── Display ──────────────────────────────────────────────────────────────────
@@ -84,6 +90,10 @@ impl fmt::Display for AppError {
             AppError::Puzzle(msg) => write!(f, "puzzle error: {msg}"),
             AppError::PuzzleIntegrity(e) => write!(f, "puzzle integrity error: {e}"),
             AppError::Leaderboard(msg) => write!(f, "leaderboard error: {msg}"),
+            AppError::PluginNotFound(id) => write!(f, "plugin '{id}' not found"),
+            AppError::PluginAlreadyRegistered(id) => {
+                write!(f, "plugin '{id}' is already registered")
+            }
         }
     }
 }
@@ -246,6 +256,8 @@ mod tests {
         assert!(AppError::InventoryItemNotFound("x".into()).source().is_none());
         assert!(AppError::Puzzle("x".into()).source().is_none());
         assert!(AppError::Leaderboard("x".into()).source().is_none());
+        assert!(AppError::PluginNotFound("x".into()).source().is_none());
+        assert!(AppError::PluginAlreadyRegistered("x".into()).source().is_none());
         assert!(AppError::NftAlreadyMinted {
             player_id: "p".into(),
             milestone_type: "m".into(),
@@ -277,5 +289,19 @@ mod tests {
         };
         let app: AppError = inner.into();
         assert!(matches!(app, AppError::PuzzleIntegrity(_)));
+    }
+
+    // ── Plugin error display tests ───────────────────────────────────────────
+
+    #[test]
+    fn display_plugin_not_found() {
+        let err = AppError::PluginNotFound("physics_sim".into());
+        assert_eq!(err.to_string(), "plugin 'physics_sim' not found");
+    }
+
+    #[test]
+    fn display_plugin_already_registered() {
+        let err = AppError::PluginAlreadyRegistered("core_logic".into());
+        assert_eq!(err.to_string(), "plugin 'core_logic' is already registered");
     }
 }
